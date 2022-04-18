@@ -711,6 +711,220 @@ test "lists" {
     }, vals);
 }
 
+test "list in call" {
+    var p = Parser.init(std.testing.allocator,
+        \\foo [bar baz];
+    );
+    const vals = try p.read();
+    defer freeTree(p.allocator, vals);
+    try expectTree(&.{
+        .{ .call = &.{
+            .{ .symbol = "foo" },
+            .{ .list = &.{
+                .{ .symbol = "bar" },
+                .{ .symbol = "baz" },
+            } },
+        } },
+    }, vals);
+}
+
+test "block in call" {
+    var p = Parser.init(std.testing.allocator,
+        \\foo {bar baz;};
+    );
+    const vals = try p.read();
+    defer freeTree(p.allocator, vals);
+    try expectTree(&.{
+        .{ .call = &.{
+            .{ .symbol = "foo" },
+            .{ .block = &.{
+                .{ .call = &.{
+                    .{ .symbol = "bar" },
+                    .{ .symbol = "baz" },
+                } },
+            } },
+        } },
+    }, vals);
+}
+
+test "trailing whitespace" {
+    var p = Parser.init(std.testing.allocator, "foo ");
+    const vals = try p.read();
+    defer freeTree(p.allocator, vals);
+    try expectTree(&.{
+        .{ .symbol = "foo" },
+    }, vals);
+}
+
+test "mixed 1" {
+    var p = Parser.init(std.testing.allocator,
+        \\fn main(x: i32) {
+        \\	if (x < 3) {
+        \\		print "Hello, world!";
+        \\	};
+        \\};
+    );
+    const vals = try p.read();
+    defer freeTree(p.allocator, vals);
+    try expectTree(&.{
+        .{ .call = &.{
+            .{ .symbol = "fn" },
+            .{ .symbol = "main" },
+            .{ .call = &.{
+                .{ .operator = ":" },
+                .{ .symbol = "x" },
+                .{ .symbol = "i32" },
+            } },
+            .{ .block = &.{
+                .{ .call = &.{
+                    .{ .symbol = "if" },
+                    .{ .call = &.{
+                        .{ .operator = "<" },
+                        .{ .symbol = "x" },
+                        .{ .number = "3" },
+                    } },
+                    .{ .block = &.{
+                        .{ .call = &.{
+                            .{ .symbol = "print" },
+                            .{ .string = "Hello, world!" },
+                        } },
+                    } },
+                } },
+            } },
+        } },
+    }, vals);
+}
+
+test "mixed 2" {
+    var p = Parser.init(std.testing.allocator,
+        \\font "Fira Mono" 12;
+        \\colors {
+        \\	foreground 0xefeade;
+        \\	background 0x131420;
+        \\};
+    );
+    const vals = try p.read();
+    defer freeTree(p.allocator, vals);
+    try expectTree(&.{
+        .{ .call = &.{
+            .{ .symbol = "font" },
+            .{ .string = "Fira Mono" },
+            .{ .number = "12" },
+        } },
+        .{ .call = &.{
+            .{ .symbol = "colors" },
+            .{ .block = &.{
+                .{ .call = &.{
+                    .{ .symbol = "foreground" },
+                    .{ .number = "0xefeade" },
+                } },
+                .{ .call = &.{
+                    .{ .symbol = "background" },
+                    .{ .number = "0x131420" },
+                } },
+            } },
+        } },
+    }, vals);
+}
+
+test "mixed 3" {
+    var p = Parser.init(std.testing.allocator,
+        \\person { name "Ada Lovelace"; dob "1815-12-10"; };
+        \\person { name "Alan Turing"; dob "1912-06-23"; };
+        \\person { name "Grace Hopper"; dob "1906-12-09"; };
+        \\person { name "Mary Ann Horton"; dob "1955-11-21"; };
+    );
+    const vals = try p.read();
+    defer freeTree(p.allocator, vals);
+    try expectTree(&.{
+        .{ .call = &.{
+            .{ .symbol = "person" },
+            .{ .block = &.{
+                .{ .call = &.{
+                    .{ .symbol = "name" },
+                    .{ .string = "Ada Lovelace" },
+                } },
+                .{ .call = &.{
+                    .{ .symbol = "dob" },
+                    .{ .string = "1815-12-10" },
+                } },
+            } },
+        } },
+        .{ .call = &.{
+            .{ .symbol = "person" },
+            .{ .block = &.{
+                .{ .call = &.{
+                    .{ .symbol = "name" },
+                    .{ .string = "Alan Turing" },
+                } },
+                .{ .call = &.{
+                    .{ .symbol = "dob" },
+                    .{ .string = "1912-06-23" },
+                } },
+            } },
+        } },
+        .{ .call = &.{
+            .{ .symbol = "person" },
+            .{ .block = &.{
+                .{ .call = &.{
+                    .{ .symbol = "name" },
+                    .{ .string = "Grace Hopper" },
+                } },
+                .{ .call = &.{
+                    .{ .symbol = "dob" },
+                    .{ .string = "1906-12-09" },
+                } },
+            } },
+        } },
+        .{ .call = &.{
+            .{ .symbol = "person" },
+            .{ .block = &.{
+                .{ .call = &.{
+                    .{ .symbol = "name" },
+                    .{ .string = "Mary Ann Horton" },
+                } },
+                .{ .call = &.{
+                    .{ .symbol = "dob" },
+                    .{ .string = "1955-11-21" },
+                } },
+            } },
+        } },
+    }, vals);
+}
+
+test "mixed 4" {
+    var p = Parser.init(std.testing.allocator,
+        \\use sys [stdout writeLn];
+        \\fn main {
+        \\	writeLn stdout "Hello, world!";
+        \\};
+        \\
+    );
+    const vals = try p.read();
+    defer freeTree(p.allocator, vals);
+    try expectTree(&.{
+        .{ .call = &.{
+            .{ .symbol = "use" },
+            .{ .symbol = "sys" },
+            .{ .list = &.{
+                .{ .symbol = "stdout" },
+                .{ .symbol = "writeLn" },
+            } },
+        } },
+        .{ .call = &.{
+            .{ .symbol = "fn" },
+            .{ .symbol = "main" },
+            .{ .block = &.{
+                .{ .call = &.{
+                    .{ .symbol = "writeLn" },
+                    .{ .symbol = "stdout" },
+                    .{ .string = "Hello, world!" },
+                } },
+            } },
+        } },
+    }, vals);
+}
+
 fn expectTree(expected: []const Value, actual: []const Value) error{TestExpectedEqual}!void {
     const Tag = std.meta.Tag(Value);
     try std.testing.expectEqual(expected.len, actual.len);
