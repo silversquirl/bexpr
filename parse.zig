@@ -72,6 +72,7 @@ pub const Parser = struct {
         while (self.peekByte() != null) {
             const val = try self.readExpr();
             try array.append(val);
+            self.skipWs();
         }
         return array.toOwnedSlice();
     }
