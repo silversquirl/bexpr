@@ -248,10 +248,19 @@ pub const Parser = struct {
 
     fn readNum(self: *Parser) !Value {
         const start = self.offset;
-        {
-            const byte = self.peekByte().?;
-            std.debug.assert(std.ascii.isDigit(byte));
-            self.nextByte();
+        const first_digit = self.peekByte().?;
+        std.debug.assert(std.ascii.isDigit(first_digit));
+        self.nextByte();
+
+        // Check base
+        if (first_digit == '0') {
+            if (self.peekByte()) |byte| {
+                switch (byte) {
+                    'o' => return self.readIntBase(start, octDigit),
+                    'x' => return self.readIntBase(start, std.ascii.isXDigit),
+                    else => {},
+                }
+            }
         }
 
         while (self.peekByte()) |byte| {
@@ -288,6 +297,19 @@ pub const Parser = struct {
         return Value{
             .number = try self.allocator.dupe(u8, self.source[start..self.offset]),
         };
+    }
+    fn readIntBase(self: *Parser, start: usize, comptime isDigit: fn (digit: u8) bool) !Value {
+        self.nextByte(); // Skip base char
+        while (self.peekByte()) |byte| {
+            if (!isDigit(byte)) break;
+            self.nextByte();
+        }
+        return Value{
+            .number = try self.allocator.dupe(u8, self.source[start..self.offset]),
+        };
+    }
+    fn octDigit(digit: u8) bool {
+        return digit >= '0' and digit < '8';
     }
 
     fn readSym(self: *Parser) !Value {
@@ -599,7 +621,9 @@ test "nested call" {
 test "numbers" {
     var p = Parser.init(std.testing.allocator,
         \\123; 456; 1.23; 123.05;
-        \\1e7; 1.3e-2; 123.67e+10
+        \\1e7; 1.3e-2; 123.67e+10;
+        \\0x10; 0xae1; 0x23f;
+        \\0o10; 0o71; 0o23;
     );
     const vals = try p.read();
     defer freeTree(p.allocator, vals);
@@ -608,9 +632,18 @@ test "numbers" {
         .{ .number = "456" },
         .{ .number = "1.23" },
         .{ .number = "123.05" },
+
         .{ .number = "1e7" },
         .{ .number = "1.3e-2" },
         .{ .number = "123.67e+10" },
+
+        .{ .number = "0x10" },
+        .{ .number = "0xae1" },
+        .{ .number = "0x23f" },
+
+        .{ .number = "0o10" },
+        .{ .number = "0o71" },
+        .{ .number = "0o23" },
     }, vals);
 }
 
