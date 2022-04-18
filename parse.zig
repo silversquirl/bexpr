@@ -6,6 +6,7 @@ pub const Value = union(enum) {
     string: []const u8,
     number: []const u8,
     operator: []const u8,
+    list: []const Value,
     call: []const Value,
     block: []const Value,
 
@@ -15,6 +16,7 @@ pub const Value = union(enum) {
             .string => |str| allocator.free(str),
             .number => |num| allocator.free(num),
             .operator => |op| allocator.free(op),
+            .list => |list| freeTree(allocator, list),
             .call => |call| freeTree(allocator, call),
             .block => |blk| freeTree(allocator, blk),
         }
@@ -173,9 +175,10 @@ pub const Parser = struct {
                 self.nextByte();
                 return error.EndOfExpr;
             },
-            '}', ')' => return error.EndOfExpr,
+            '}', ']', ')' => return error.EndOfExpr,
 
             '{' => return self.readBlock(),
+            '[' => return self.readList(),
             '(' => return self.readParen(),
             '"' => return self.readString(),
             // TODO: signed numbers - annoying because of operators
@@ -184,7 +187,7 @@ pub const Parser = struct {
         }
     }
 
-    fn readBlock(self: *Parser) !Value {
+    fn readBlock(self: *Parser) ReadError!Value {
         std.debug.assert(self.peekByte() == @as(u8, '{'));
         self.nextByte();
 
@@ -198,6 +201,26 @@ pub const Parser = struct {
         self.nextByte();
 
         return Value{ .block = array.toOwnedSlice() };
+    }
+
+    fn readList(self: *Parser) ReadError!Value {
+        std.debug.assert(self.peekByte() == @as(u8, '['));
+        self.nextByte();
+
+        var array = std.ArrayList(Value).init(self.allocator);
+        errdefer freeTree(self.allocator, array.toOwnedSlice());
+        while (self.peekByte() != @as(u8, ']')) : (self.skipWs()) {
+            const val = self.readValue() catch |err| switch (err) {
+                error.Operator => try self.makeOpValue(try self.readOp()),
+                error.EndOfExpr => continue,
+                else => |e| return e,
+            };
+
+            try array.append(val);
+        }
+        self.nextByte();
+
+        return Value{ .list = array.toOwnedSlice() };
     }
 
     fn readParen(self: *Parser) !Value {
@@ -397,7 +420,7 @@ pub const Parser = struct {
 
 fn classify(cp: u21) ?unitab.Class {
     switch (cp) {
-        '{', '}', '(', ')', ';' => return null,
+        '{', '}', '[', ']', '(', ')', ';' => return null,
         else => {},
     }
 
@@ -647,6 +670,46 @@ test "numbers" {
     }, vals);
 }
 
+test "strings" {
+    var p = Parser.init(std.testing.allocator,
+        \\"Hello, world!"; "\"Hi\", said Jane";
+        \\"\x12\x34"; "\u{1234}";
+    );
+    const vals = try p.read();
+    defer freeTree(p.allocator, vals);
+    try expectTree(&.{
+        .{ .string = "Hello, world!" },
+        .{ .string = "\"Hi\", said Jane" },
+        .{ .string = "\x12\x34" },
+        .{ .string = "\u{1234}" },
+    }, vals);
+}
+
+test "lists" {
+    var p = Parser.init(std.testing.allocator,
+        \\[1 2 3];
+        \\[abc def];
+        \\["foo" "bar"];
+    );
+    const vals = try p.read();
+    defer freeTree(p.allocator, vals);
+    try expectTree(&.{
+        .{ .list = &.{
+            .{ .number = "1" },
+            .{ .number = "2" },
+            .{ .number = "3" },
+        } },
+        .{ .list = &.{
+            .{ .symbol = "abc" },
+            .{ .symbol = "def" },
+        } },
+        .{ .list = &.{
+            .{ .string = "foo" },
+            .{ .string = "bar" },
+        } },
+    }, vals);
+}
+
 fn expectTree(expected: []const Value, actual: []const Value) error{TestExpectedEqual}!void {
     const Tag = std.meta.Tag(Value);
     try std.testing.expectEqual(expected.len, actual.len);
@@ -660,6 +723,7 @@ fn expectTree(expected: []const Value, actual: []const Value) error{TestExpected
             .string => |str| try std.testing.expectEqualStrings(str, actual[i].string),
             .number => |num| try std.testing.expectEqualStrings(num, actual[i].number),
             .operator => |op| try std.testing.expectEqualStrings(op, actual[i].operator),
+            .list => |list| try expectTree(list, actual[i].list),
             .call => |call| try expectTree(call, actual[i].call),
             .block => |blk| try expectTree(blk, actual[i].block),
         }
