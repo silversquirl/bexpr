@@ -5,7 +5,6 @@ pub const Value = union(enum) {
     symbol: []const u8,
     string: []const u8,
     number: []const u8,
-    operator: []const u8,
     list: []const Value,
     call: []const Value,
     block: []const Value,
@@ -15,7 +14,6 @@ pub const Value = union(enum) {
             .symbol => |sym| allocator.free(sym),
             .string => |str| allocator.free(str),
             .number => |num| allocator.free(num),
-            .operator => |op| allocator.free(op),
             .list => |list| freeTree(allocator, list),
             .call => |call| freeTree(allocator, call),
             .block => |blk| freeTree(allocator, blk),
@@ -378,7 +376,7 @@ pub const Parser = struct {
         return self.source[start..self.offset];
     }
     fn makeOpValue(self: *Parser, op: []const u8) !Value {
-        return Value{ .operator = try self.allocator.dupe(u8, op) };
+        return Value{ .symbol = try self.allocator.dupe(u8, op) };
     }
 
     fn skipWs(self: *Parser) void {
@@ -485,12 +483,12 @@ test "operator" {
     defer freeTree(p.allocator, vals);
     try expectTree(&.{
         .{ .call = &.{
-            .{ .operator = "+" },
+            .{ .symbol = "+" },
             .{ .symbol = "abc" },
             .{ .symbol = "def" },
         } },
         .{ .call = &.{
-            .{ .operator = "*" },
+            .{ .symbol = "*" },
             .{ .symbol = "ghi" },
             .{ .symbol = "jkl" },
             .{ .symbol = "mno" },
@@ -507,11 +505,11 @@ test "nested operator" {
     defer freeTree(p.allocator, vals);
     try expectTree(&.{
         .{ .call = &.{
-            .{ .operator = "+" },
+            .{ .symbol = "+" },
             .{ .symbol = "abc" },
             .{ .symbol = "def" },
             .{ .call = &.{
-                .{ .operator = "*" },
+                .{ .symbol = "*" },
                 .{ .symbol = "ghi" },
                 .{ .symbol = "jkl" },
                 .{ .symbol = "mno" },
@@ -529,19 +527,19 @@ test "prefix operator" {
     defer freeTree(p.allocator, vals);
     try expectTree(&.{
         .{ .call = &.{
-            .{ .operator = "+" },
+            .{ .symbol = "+" },
             .{ .symbol = "abc" },
             .{ .symbol = "def" },
         } },
         .{ .call = &.{
-            .{ .operator = "*" },
+            .{ .symbol = "*" },
             .{ .symbol = "ghi" },
             .{ .symbol = "jkl" },
             .{ .symbol = "mno" },
             .{ .symbol = "p" },
         } },
         .{ .call = &.{
-            .{ .operator = "-" },
+            .{ .symbol = "-" },
             .{ .symbol = "qrs" },
         } },
     }, vals);
@@ -554,8 +552,8 @@ test "operator value" {
     const vals = try p.read();
     defer freeTree(p.allocator, vals);
     try expectTree(&.{
-        .{ .operator = "+" },
-        .{ .operator = "*" },
+        .{ .symbol = "+" },
+        .{ .symbol = "*" },
     }, vals);
 }
 
@@ -566,8 +564,8 @@ test "parenthesized operator" {
     const vals = try p.read();
     defer freeTree(p.allocator, vals);
     try expectTree(&.{
-        .{ .operator = "+" },
-        .{ .operator = "*" },
+        .{ .symbol = "+" },
+        .{ .symbol = "*" },
     }, vals);
 }
 
@@ -581,7 +579,7 @@ test "first class operator" {
     try expectTree(&.{
         .{ .call = &.{
             .{ .symbol = "reduce" },
-            .{ .operator = "+" },
+            .{ .symbol = "+" },
             .{ .number = "0" },
             .{ .symbol = "list" },
         } },
@@ -771,7 +769,7 @@ test "mixed 1" {
             .{ .symbol = "fn" },
             .{ .symbol = "main" },
             .{ .call = &.{
-                .{ .operator = ":" },
+                .{ .symbol = ":" },
                 .{ .symbol = "x" },
                 .{ .symbol = "i32" },
             } },
@@ -779,7 +777,7 @@ test "mixed 1" {
                 .{ .call = &.{
                     .{ .symbol = "if" },
                     .{ .call = &.{
-                        .{ .operator = "<" },
+                        .{ .symbol = "<" },
                         .{ .symbol = "x" },
                         .{ .number = "3" },
                     } },
@@ -937,7 +935,6 @@ fn expectTree(expected: []const Value, actual: []const Value) error{TestExpected
             .symbol => |sym| try std.testing.expectEqualStrings(sym, actual[i].symbol),
             .string => |str| try std.testing.expectEqualStrings(str, actual[i].string),
             .number => |num| try std.testing.expectEqualStrings(num, actual[i].number),
-            .operator => |op| try std.testing.expectEqualStrings(op, actual[i].operator),
             .list => |list| try expectTree(list, actual[i].list),
             .call => |call| try expectTree(call, actual[i].call),
             .block => |blk| try expectTree(blk, actual[i].block),
