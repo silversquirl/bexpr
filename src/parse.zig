@@ -27,6 +27,12 @@ pub fn freeTree(allocator: std.mem.Allocator, vals: []const Value) void {
     }
     allocator.free(vals);
 }
+fn freeArrayTree(l: std.ArrayList(Value)) void {
+    for (l.items) |val| {
+        val.deinit(l.allocator);
+    }
+    l.deinit();
+}
 
 pub const Parser = struct {
     source: []const u8,
@@ -66,7 +72,7 @@ pub const Parser = struct {
 
     pub fn read(self: *Parser) ReadError![]const Value {
         var array = std.ArrayList(Value).init(self.allocator);
-        errdefer freeTree(self.allocator, array.toOwnedSlice());
+        errdefer freeArrayTree(array);
         while (self.peekByte() != null) {
             const val = try self.readExpr();
             try array.append(val);
@@ -110,7 +116,7 @@ pub const Parser = struct {
     fn readOpExpr(self: *Parser, first_val: Value) ReadError!Value {
         const op = try self.readOp();
         var vals = std.ArrayList(Value).init(self.allocator);
-        errdefer freeTree(self.allocator, vals.toOwnedSlice());
+        errdefer freeArrayTree(vals);
         try vals.append(try self.makeOpValue(op));
         try vals.append(first_val);
 
@@ -141,12 +147,12 @@ pub const Parser = struct {
             else => |e| return e,
         }
 
-        return Value{ .call = vals.toOwnedSlice() };
+        return Value{ .call = try vals.toOwnedSlice() };
     }
 
     fn readCallExpr(self: *Parser, func: Value, first_arg: Value) ReadError!Value {
         var vals = std.ArrayList(Value).init(self.allocator);
-        errdefer freeTree(self.allocator, vals.toOwnedSlice());
+        errdefer freeArrayTree(vals);
         try vals.append(func);
         try vals.append(first_arg);
 
@@ -161,7 +167,7 @@ pub const Parser = struct {
             else => |e| return e,
         }
 
-        return Value{ .call = vals.toOwnedSlice() };
+        return Value{ .call = try vals.toOwnedSlice() };
     }
 
     fn readValue(self: *Parser) !Value {
@@ -191,7 +197,7 @@ pub const Parser = struct {
         self.nextByte();
 
         var array = std.ArrayList(Value).init(self.allocator);
-        errdefer freeTree(self.allocator, array.toOwnedSlice());
+        errdefer freeArrayTree(array);
         while (self.peekByte() != @as(u8, '}')) {
             const val = try self.readExpr();
             try array.append(val);
@@ -199,7 +205,7 @@ pub const Parser = struct {
         }
         self.nextByte();
 
-        return Value{ .block = array.toOwnedSlice() };
+        return Value{ .block = try array.toOwnedSlice() };
     }
 
     fn readList(self: *Parser) ReadError!Value {
@@ -207,7 +213,7 @@ pub const Parser = struct {
         self.nextByte();
 
         var array = std.ArrayList(Value).init(self.allocator);
-        errdefer freeTree(self.allocator, array.toOwnedSlice());
+        errdefer freeArrayTree(array);
         while (self.peekByte() != @as(u8, ']')) : (self.skipWs()) {
             const val = self.readValue() catch |err| switch (err) {
                 error.Operator => try self.makeOpValue(try self.readOp()),
@@ -219,7 +225,7 @@ pub const Parser = struct {
         }
         self.nextByte();
 
-        return Value{ .list = array.toOwnedSlice() };
+        return Value{ .list = try array.toOwnedSlice() };
     }
 
     fn readParen(self: *Parser) !Value {
@@ -259,8 +265,8 @@ pub const Parser = struct {
         var buf = std.ArrayList(u8).init(self.allocator);
         defer buf.deinit();
 
-        switch (try std.zig.string_literal.parseAppend(&buf, self.source[start..self.offset])) {
-            .success => return Value{ .string = buf.toOwnedSlice() },
+        switch (try std.zig.string_literal.parseWrite(buf.writer(), self.source[start..self.offset])) {
+            .success => return Value{ .string = try buf.toOwnedSlice() },
             .failure => |err| {
                 self.err = .{ .string_literal = err };
                 return error.ParseError;
@@ -279,7 +285,7 @@ pub const Parser = struct {
             if (self.peekByte()) |byte| {
                 switch (byte) {
                     'o' => return self.readIntBase(start, octDigit),
-                    'x' => return self.readIntBase(start, std.ascii.isXDigit),
+                    'x' => return self.readIntBase(start, std.ascii.isHex),
                     else => {},
                 }
             }
@@ -381,7 +387,7 @@ pub const Parser = struct {
 
     fn skipWs(self: *Parser) void {
         while (self.peekByte()) |byte| {
-            if (std.ascii.isSpace(byte)) {
+            if (std.ascii.isWhitespace(byte)) {
                 self.nextByte();
             } else {
                 break;
@@ -425,7 +431,7 @@ fn classify(cp: u21) ?unitab.Class {
 
     const idx = std.sort.binarySearch(
         unitab.Entry,
-        .{ .codepoint = cp, .class = undefined },
+        cp,
         &unitab.table,
         {},
         classifyOrder,
@@ -433,8 +439,8 @@ fn classify(cp: u21) ?unitab.Class {
 
     return unitab.table[idx].class;
 }
-fn classifyOrder(_: void, lhs: unitab.Entry, rhs: unitab.Entry) std.math.Order {
-    return std.math.order(lhs.codepoint, rhs.codepoint);
+fn classifyOrder(_: void, cp: u21, entry: unitab.Entry) std.math.Order {
+    return std.math.order(cp, entry.codepoint);
 }
 
 test "symbol" {
@@ -926,7 +932,7 @@ test "mixed 4" {
 fn expectTree(expected: []const Value, actual: []const Value) error{TestExpectedEqual}!void {
     const Tag = std.meta.Tag(Value);
     try std.testing.expectEqual(expected.len, actual.len);
-    for (expected) |val, i| {
+    for (expected, 0..) |val, i| {
         if (@as(Tag, val) != @as(Tag, actual[i])) {
             std.debug.print("Expected {}, got {}\n", .{ val, actual[i] });
             return error.TestExpectedEqual;

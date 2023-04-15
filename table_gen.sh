@@ -30,4 +30,4 @@ EOF
 	done
 
 	echo "};"
-} | zig fmt --stdin >unicode_table.zig
+} | zig fmt --stdin >src/unicode_table.zig
